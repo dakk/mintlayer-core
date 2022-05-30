@@ -52,6 +52,8 @@ use spend_cache::CachedInputs;
 
 use consensus_validator::BlockIndexHandle;
 
+use self::spend_cache::SpendKind;
+
 // TODO: ISSUE #129 - https://github.com/mintlayer/mintlayer-core/issues/129
 pub struct Consensus {
     chain_config: Arc<ChainConfig>,
@@ -479,8 +481,19 @@ impl<'a> ConsensusRef<'a> {
     ) -> Result<CachedInputs, BlockError> {
         let mut cached_inputs = CachedInputs::new(&self.db_tx);
         for (tx_num, _tx) in block.transactions().iter().enumerate() {
-            cached_inputs.spend(block, tx_num, spend_height, blockreward_maturity)?;
+            cached_inputs.spend(
+                block,
+                SpendKind::Transaction(tx_num),
+                spend_height,
+                blockreward_maturity,
+            )?;
         }
+        cached_inputs.spend(
+            block,
+            SpendKind::BlockReward,
+            spend_height,
+            blockreward_maturity,
+        )?;
         Ok(cached_inputs)
     }
 
