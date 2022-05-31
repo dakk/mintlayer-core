@@ -17,7 +17,7 @@
 //
 // Author(s): A. Altonen
 use crate::{
-    error::{Libp2pError, P2pError, ProtocolError},
+    error::{DialError, P2pError, ProtocolError},
     message,
     net::{
         self, libp2p::sync::*, ConnectivityEvent, ConnectivityService, NetworkingService,
@@ -255,7 +255,9 @@ impl NetworkingService for Libp2pService {
     )> {
         let id_keys = identity::Keypair::generate_ed25519();
         let peer_id = id_keys.public().to_peer_id();
-        let noise_keys = noise::Keypair::<noise::X25519Spec>::new().into_authentic(&id_keys)?;
+        let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
+            .into_authentic(&id_keys)
+            .map_err(|_| P2pError::Other("Failed to create Noise keys"))?;
 
         let transport = TcpConfig::new()
             .nodelay(true)
@@ -346,7 +348,8 @@ impl NetworkingService for Libp2pService {
                 response: tx,
             })
             .await?;
-        rx.await?.map_err(|_| P2pError::SocketError(std::io::ErrorKind::AddrInUse))?;
+        rx.await?
+            .map_err(|_| P2pError::DialError(DialError::IoError(std::io::ErrorKind::AddrInUse)))?;
 
         Ok((
             Self::ConnectivityHandle {
@@ -380,18 +383,11 @@ where
     async fn connect(&mut self, addr: T::Address) -> crate::Result<net::PeerInfo<T>> {
         log::debug!("try to establish outbound connection, address {:?}", addr);
 
-        // TODO: refactor error code
+        // TODO: add tests for both cases
         let peer_id = match addr.iter().last() {
-            Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).map_err(|_| {
-                P2pError::Libp2pError(Libp2pError::DialError(
-                    "Expect peer multiaddr to contain peer ID.".into(),
-                ))
-            })?,
-            _ => {
-                return Err(P2pError::Libp2pError(Libp2pError::DialError(
-                    "Expect peer multiaddr to contain peer ID.".into(),
-                )))
-            }
+            Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash)
+                .map_err(|_| P2pError::ConversionError("Multiaddr contains an invalid PeerId"))?,
+            _ => return Err(P2pError::InvalidData("Multiaddr must contain PeerId")),
         };
 
         // try to connect to remote peer
@@ -688,7 +684,10 @@ mod tests {
 
         match service {
             Err(e) => {
-                assert_eq!(e, P2pError::SocketError(std::io::ErrorKind::AddrInUse));
+                assert_eq!(
+                    e,
+                    P2pError::DialError(DialError::IoError(std::io::ErrorKind::AddrInUse))
+                );
             }
             Ok(_) => panic!("address is not in use"),
         }
@@ -748,12 +747,7 @@ mod tests {
         match service.connect(addr).await {
             Ok(_) => panic!("connect succeeded without peer id"),
             Err(e) => {
-                assert_eq!(
-                    e,
-                    P2pError::Libp2pError(Libp2pError::DialError(
-                        "Expect peer multiaddr to contain peer ID.".into(),
-                    ))
-                )
+                assert_eq!(e, P2pError::InvalidData("Multiaddr must contain PeerId"))
             }
         }
     }
@@ -944,7 +938,9 @@ mod tests {
         let start = std::time::SystemTime::now();
         assert_eq!(
             service.connect(addr.clone()).await,
-            Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused))
+            Err(P2pError::DialError(DialError::IoError(
+                std::io::ErrorKind::ConnectionRefused
+            )))
         );
 
         let timeout = if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
@@ -964,7 +960,9 @@ mod tests {
 
         assert_eq!(
             service.connect(addr).await,
-            Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused))
+            Err(P2pError::DialError(DialError::IoError(
+                std::io::ErrorKind::ConnectionRefused
+            )))
         );
         assert!(std::time::SystemTime::now().duration_since(start).unwrap().as_secs() >= 2);
     }

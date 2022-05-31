@@ -22,7 +22,7 @@ use common::chain::{
 };
 use libp2p::Multiaddr;
 use p2p::{
-    error::{Libp2pError, P2pError, ProtocolError},
+    error::{P2pError, ProtocolError, PublishError},
     message::{self, MessageType, PubSubMessage, SyncingMessage, SyncingRequest},
     net::{
         self,
@@ -80,12 +80,9 @@ async fn test_libp2p_gossipsub() {
         if res.is_ok() {
             break;
         } else {
-            // TODO: refactor error code
             assert_eq!(
                 res,
-                Err(P2pError::Libp2pError(Libp2pError::PublishError(
-                    "NoPeers".to_string()
-                )))
+                Err(P2pError::PublishError(PublishError::InsufficientPeers))
             );
         }
     }
@@ -205,12 +202,9 @@ async fn test_libp2p_gossipsub_3_peers() {
         if res.is_ok() {
             break;
         } else {
-            // TODO: refactor error code
             assert_eq!(
                 res,
-                Err(P2pError::Libp2pError(Libp2pError::PublishError(
-                    "NoPeers".to_string()
-                )))
+                Err(P2pError::PublishError(PublishError::InsufficientPeers))
             );
         }
     }
@@ -362,9 +356,6 @@ async fn test_libp2p_gossipsub_too_big_message() {
                 )),
             })
             .await,
-        // TODO: refactor error code
-        Err(P2pError::Libp2pError(Libp2pError::PublishError(
-            "MessageTooLarge".to_string()
-        )))
+        Err(P2pError::PublishError(PublishError::MessageTooLarge))
     );
 }

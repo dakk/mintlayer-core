@@ -15,13 +15,13 @@
 //
 // Author(s): A. Altonen
 use crate::{
-    error::{Libp2pError, P2pError, ProtocolError},
+    error::{DialError, P2pError, PeerError, ProtocolError},
     net::libp2p::{
         backend::{Backend, PendingState},
         types,
     },
 };
-use libp2p::{core::connection::ConnectedPoint, swarm::DialError, PeerId};
+use libp2p::{core::connection::ConnectedPoint, swarm::DialError as Libp2pDialError, PeerId};
 use logging::log;
 
 impl Backend {
@@ -49,7 +49,7 @@ impl Backend {
                     }
                     None => {
                         log::error!("peer {:?} does not exist", peer_id);
-                        Err(P2pError::PeerDoesntExist)
+                        Err(P2pError::PeerError(PeerError::PeerDoesntExist))
                     }
                 }
             }
@@ -86,21 +86,19 @@ impl Backend {
     pub async fn on_outgoing_connection_error(
         &mut self,
         peer_id: Option<PeerId>,
-        error: DialError,
+        error: Libp2pDialError,
     ) -> crate::Result<()> {
         if let Some(peer_id) = peer_id {
             match self.pending_conns.remove(&peer_id) {
                 Some(PendingState::Dialed { tx } | PendingState::OutboundAccepted { tx }) => tx
-                    .send(Err(P2pError::SocketError(
+                    .send(Err(P2pError::DialError(DialError::IoError(
                         std::io::ErrorKind::ConnectionRefused,
-                    )))
+                    ))))
                     .map_err(|_| P2pError::ChannelClosed),
                 _ => {
                     // TODO: report to swarm manager?
                     log::debug!("connection failed for peer {:?}: {:?}", peer_id, error);
-                    Err(P2pError::Libp2pError(Libp2pError::DialError(
-                        error.to_string(),
-                    )))
+                    Err(error.into())
                 }
             }
         } else {
@@ -219,7 +217,7 @@ mod tests {
                     }
                 )
                 .await,
-            Err(P2pError::PeerDoesntExist)
+            Err(P2pError::PeerError(PeerError::PeerDoesntExist))
         );
     }
 
@@ -303,7 +301,7 @@ mod tests {
         .await;
 
         assert_eq!(
-            backend.on_outgoing_connection_error(None, DialError::LocalPeerId).await,
+            backend.on_outgoing_connection_error(None, Libp2pDialError::LocalPeerId).await,
             Ok(())
         );
     }
@@ -321,11 +319,13 @@ mod tests {
         backend.pending_conns.insert(peer_id, backend::PendingState::Dialed { tx });
 
         assert_eq!(
-            backend.on_outgoing_connection_error(Some(peer_id), DialError::Banned,).await,
+            backend
+                .on_outgoing_connection_error(Some(peer_id), Libp2pDialError::Banned,)
+                .await,
             Ok(())
         );
 
-        if let Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused)) =
+        if let Err(P2pError::DialError(DialError::IoError(std::io::ErrorKind::ConnectionRefused))) =
             rx.try_recv().unwrap()
         {
         } else {
@@ -348,11 +348,13 @@ mod tests {
             .insert(peer_id, backend::PendingState::OutboundAccepted { tx });
 
         assert_eq!(
-            backend.on_outgoing_connection_error(Some(peer_id), DialError::Aborted,).await,
+            backend
+                .on_outgoing_connection_error(Some(peer_id), Libp2pDialError::Aborted,)
+                .await,
             Ok(())
         );
 
-        if let Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused)) =
+        if let Err(P2pError::DialError(DialError::IoError(std::io::ErrorKind::ConnectionRefused))) =
             rx.try_recv().unwrap()
         {
         } else {
@@ -370,11 +372,9 @@ mod tests {
         .await;
         assert_eq!(
             backend
-                .on_outgoing_connection_error(Some(PeerId::random()), DialError::NoAddresses,)
+                .on_outgoing_connection_error(Some(PeerId::random()), Libp2pDialError::NoAddresses)
                 .await,
-            Err(P2pError::Libp2pError(Libp2pError::DialError(
-                "Dial error: no addresses for peer.".to_string()
-            )))
+            Err(P2pError::DialError(DialError::NoAddresses))
         );
     }
 }

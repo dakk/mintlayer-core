@@ -15,7 +15,7 @@
 //
 // Author(s): A. Altonen
 use crate::{
-    error::{FatalError, P2pError, ProtocolError},
+    error::{FatalError, P2pError, PeerError, ProtocolError},
     event,
     net::{self, ConnectivityService, NetworkingService},
 };
@@ -120,7 +120,7 @@ where
                             Some(_) => {
                                 log::error!("peer already exists");
                                 response
-                                    .send(Err(P2pError::PeerExists))
+                                    .send(Err(P2pError::PeerError(PeerError::PeerExists)))
                                     .map_err(|_| P2pError::ChannelClosed)
                             }
                             None => {
@@ -183,7 +183,7 @@ where
                 self.peers.len(),
                 MAX_ACTIVE_CONNECTIONS,
             );
-            return Err(P2pError::NoPeers);
+            return Err(P2pError::PeerError(PeerError::NoPeers));
         }
 
         let npeers = std::cmp::min(
@@ -386,7 +386,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{error::P2pError, event};
+    use crate::{
+        error::{DialError, P2pError},
+        event,
+    };
     use common::chain::config;
     use libp2p::{multiaddr::Protocol, Multiaddr, PeerId};
     use net::{libp2p::Libp2pService, mock::MockService, ConnectivityService};
@@ -439,7 +442,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             rx.await.unwrap(),
-            Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused))
+            Err(P2pError::DialError(DialError::IoError(
+                std::io::ErrorKind::ConnectionRefused
+            )))
         );
     }
 
@@ -461,7 +466,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             rx.await.unwrap(),
-            Err(P2pError::SocketError(std::io::ErrorKind::ConnectionRefused))
+            Err(P2pError::DialError(DialError::IoError(
+                std::io::ErrorKind::ConnectionRefused
+            )))
         );
     }
 

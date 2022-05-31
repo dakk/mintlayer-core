@@ -14,7 +14,10 @@
 // limitations under the License.
 //
 // Author(s): A. Altonen
-use crate::{net::NetworkingService, P2pError};
+use crate::{
+    error::{P2pError, ProtocolError},
+    net::NetworkingService,
+};
 use common::{
     chain::block::{Block, BlockHeader},
     primitives::{Id, Idable},
@@ -92,12 +95,14 @@ where
                         expected,
                         header
                     );
-                    return Err(P2pError::InvalidData);
+                    // TODO: this is a protocol error
+                    return Err(P2pError::ProtocolError(ProtocolError::InvalidMessage));
                 }
             }
             _ => {
+                // TODO: this is a protocol error
                 log::error!("received a header from peer while not expecting it");
-                return Err(P2pError::InvalidData);
+                return Err(P2pError::ProtocolError(ProtocolError::InvalidMessage));
             }
         }
 
